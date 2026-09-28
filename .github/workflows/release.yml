@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - label: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+          - label: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - label: windows-aarch64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd target/${{ matrix.target }}/release
+          zip "$GITHUB_WORKSPACE/studio-run-${GITHUB_REF_NAME#v}-${{ matrix.label }}.zip" studio-run
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "$env:GITHUB_REF_NAME".TrimStart("v")
+          Compress-Archive `
+            -Path target/${{ matrix.target }}/release/studio-run.exe `
+            -DestinationPath "studio-run-$version-${{ matrix.label }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: studio-run-*.zip
+          if-no-files-found: error
+
+  release:
+    name: Create draft release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --draft \
+            --title "studio-run ${GITHUB_REF_NAME#v}" \
+            --generate-notes
