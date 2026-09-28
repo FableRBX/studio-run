@@ -13,20 +13,40 @@ Windows.
 
 ## Installation
 
+### With Rokit (recommended)
+
+[Rokit](https://github.com/rojo-rbx/rokit) pins tools per project, the same way you'd install
+Rojo. In your project folder, run:
+
+```sh
+rokit add FableRBX/studio-run
+```
+
+This adds studio-run to the project's `rokit.toml`:
+
+```toml
+[tools]
+studio-run = "FableRBX/studio-run@0.1.0"
+```
+
+Anyone else working on the project then runs `rokit install` to get the same version.
+
+### From GitHub Releases
+
+Download the zip for your platform from the
+[releases page](https://github.com/FableRBX/studio-run/releases). Builds are published for
+macOS (Apple Silicon and Intel) and Windows (x64 and ARM64).
+
+Linux builds are published too, so that `rokit install` works on Linux CI runners. Studio itself
+doesn't run on Linux, so on Linux you need to pass `--studio` and `--plugins-dir`.
+
 ### From source
 
 You need [Rust](https://rustup.rs) 1.85 or newer.
 
 ```sh
-cargo install --path .
+cargo install --git https://github.com/FableRBX/studio-run
 ```
-
-### Prebuilt binaries
-
-Pushing a tag like `v0.1.0` runs the release workflow. It publishes binaries for macOS (Apple
-Silicon and Intel) and Windows (x64 and ARM64) to a draft GitHub release. The assets are named
-`studio-run-<version>-<os>-<arch>.zip`, which [Rokit](https://github.com/rojo-rbx/rokit),
-Aftman and Foreman all understand.
 
 ## Usage
 

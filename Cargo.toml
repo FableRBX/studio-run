@@ -5,9 +5,11 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
+repository = "https://github.com/FableRBX/studio-run"
 readme = "README.md"
 keywords = ["roblox", "luau", "studio", "testing", "ci"]
 categories = ["command-line-utilities", "development-tools::testing"]
+exclude = [".github"]
 
 [dependencies]
 anstream = "1.0.0"

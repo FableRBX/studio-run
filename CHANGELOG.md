@@ -1,10 +1,12 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-09-28)
 
 This is the first release, rebuilt from scratch as a successor to run-in-roblox.
 
 - Native Apple Silicon and Intel builds for macOS, plus x64 and ARM64 builds for Windows.
+- Installable with Rokit (`rokit add FableRBX/studio-run`). Linux builds are included so that
+  `rokit install` works on Linux CI runners.
 - Runs a script in a copy of a place, or in an empty place when `--place` is omitted.
 - Only the Studio this run launched executes the script. Other open Studio windows and parallel
   runs are turned away.

@@ -8,8 +8,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check-version:
+    name: Check version
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Tag matches Cargo.toml
+        run: |
+          crate_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [ "${GITHUB_REF_NAME#v}" != "$crate_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $crate_version in Cargo.toml"
+            exit 1
+          fi
+
   build:
     name: Build (${{ matrix.label }})
+    needs: check-version
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -28,6 +44,15 @@ jobs:
           - label: windows-aarch64
             os: windows-latest
             target: aarch64-pc-windows-msvc
+          # Studio doesn't run on Linux, but Rokit installs every tool in a
+          # project's rokit.toml, so Linux machines need a build to install.
+          # musl keeps the binary static, so it runs on any distro.
+          - label: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - label: linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
 
     steps:
       - uses: actions/checkout@v5
@@ -40,11 +65,15 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Install musl tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: Build
         run: cargo build --locked --release --target ${{ matrix.target }}
 
-      - name: Package (macOS)
-        if: runner.os == 'macOS'
+      - name: Package (macOS and Linux)
+        if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           zip "$GITHUB_WORKSPACE/studio-run-${GITHUB_REF_NAME#v}-${{ matrix.label }}.zip" studio-run
@@ -65,7 +94,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Create draft release
+    name: Publish release
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -84,6 +113,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" dist/*.zip \
-            --draft \
+            --verify-tag \
             --title "studio-run ${GITHUB_REF_NAME#v}" \
             --generate-notes
