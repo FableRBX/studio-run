@@ -26,7 +26,7 @@ This adds studio-run to the project's `rokit.toml`:
 
 ```toml
 [tools]
-studio-run = "FableRBX/studio-run@0.1.0"
+studio-run = "FableRBX/studio-run@0.2.0"
 ```
 
 Anyone else working on the project then runs `rokit install` to get the same version.
