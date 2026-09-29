@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-09-29)
 
 - `--hidden` keeps Studio out of sight while it runs: hidden on macOS and minimized on Windows.
   Set `STUDIO_RUN_HIDDEN=1` to hide it on every run.
