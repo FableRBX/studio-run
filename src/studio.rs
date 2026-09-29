@@ -4,9 +4,16 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
+    sync::mpsc::{self, RecvTimeoutError},
+    thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use anyhow::{Context, bail};
+
+/// How often a hidden Studio is checked, and hidden again if it has shown
+/// itself.
+const HIDE_INTERVAL: Duration = Duration::from_millis(20);
 
 pub struct Studio {
     pub executable: PathBuf,
@@ -38,13 +45,20 @@ impl Studio {
         })
     }
 
-    pub fn launch(&self, place: &Path) -> anyhow::Result<StudioProcess> {
+    pub fn launch(&self, place: &Path, hidden: bool) -> anyhow::Result<StudioProcess> {
         let mut command = Command::new(&self.executable);
         command
             .arg(place)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+
+        // Qt apps bring themselves to the front as soon as they finish
+        // launching, which would steal focus before Studio can be hidden.
+        #[cfg(target_os = "macos")]
+        if hidden {
+            command.env("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", "1");
+        }
 
         // Keep Ctrl+C in the terminal from reaching Studio directly; studio-run
         // shuts it down itself.
@@ -68,30 +82,83 @@ impl Studio {
         })?;
 
         crate::debug!("launched Studio (pid {})", child.id());
-        Ok(StudioProcess(child))
+
+        let hider = if !hidden {
+            None
+        } else if platform::CAN_HIDE {
+            Some(Hider::start(child.id()))
+        } else {
+            crate::warning!("--hidden only works on macOS and Windows, so Studio stays visible");
+            None
+        };
+
+        Ok(StudioProcess { child, hider })
     }
 }
 
 /// A running Studio that is shut down when this guard is dropped.
-pub struct StudioProcess(Child);
+pub struct StudioProcess {
+    child: Child,
+    hider: Option<Hider>,
+}
 
 impl StudioProcess {
     pub fn try_wait(&mut self) -> Option<ExitStatus> {
-        self.0.try_wait().ok().flatten()
+        self.child.try_wait().ok().flatten()
     }
 }
 
 impl Drop for StudioProcess {
     fn drop(&mut self) {
+        // Stop hiding before Studio's process ID can be reused.
+        drop(self.hider.take());
+
         if self.try_wait().is_some() {
             return;
         }
 
         // Studio would prompt about unsaved changes if asked to quit nicely,
         // and the place is a throwaway copy anyway.
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
         crate::debug!("stopped Studio");
+    }
+}
+
+/// Keeps Studio out of sight until dropped. Studio brings itself to the front
+/// several times while it opens a place, so hiding it once isn't enough.
+struct Hider {
+    stop: mpsc::Sender<()>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Hider {
+    fn start(pid: u32) -> Self {
+        let (stop, stopped) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            let mut showing = false;
+            while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(HIDE_INTERVAL) {
+                let was_showing = showing;
+                showing = platform::hide(pid);
+                if showing && !was_showing {
+                    crate::debug!("hiding Studio");
+                }
+            }
+        });
+
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for Hider {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -165,8 +232,30 @@ mod platform {
     use std::path::PathBuf;
 
     use anyhow::{Context, bail};
+    use objc2_app_kit::NSRunningApplication;
 
     const APP_NAME: &str = "RobloxStudio.app";
+
+    pub const CAN_HIDE: bool = true;
+
+    /// Hides Studio the way Cmd+H does. Returns whether it was showing.
+    pub fn hide(pid: u32) -> bool {
+        objc2::rc::autoreleasepool(|_| {
+            // Not found until Studio has registered with the window server.
+            let Some(app) =
+                NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
+            else {
+                return false;
+            };
+            // `hide` returns false even when it works, so whether Studio was
+            // showing comes from `isHidden` instead.
+            let showing = !app.isHidden();
+            if showing {
+                app.hide();
+            }
+            showing
+        })
+    }
 
     pub fn default_executable() -> anyhow::Result<PathBuf> {
         let mut candidates = vec![PathBuf::from("/Applications").join(APP_NAME)];
@@ -206,9 +295,70 @@ mod platform {
     };
 
     use anyhow::{Context, bail};
+    use windows_sys::{
+        Win32::{
+            Foundation::{HWND, LPARAM, TRUE},
+            UI::WindowsAndMessaging::{
+                EnumWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowThreadProcessId,
+                IsIconic, IsWindowVisible, SW_MINIMIZE, SW_SHOWMINNOACTIVE, ShowWindow,
+            },
+        },
+        core::BOOL,
+    };
     use winreg::{RegKey, enums::HKEY_CURRENT_USER};
 
     const EXECUTABLE_NAME: &str = "RobloxStudioBeta.exe";
+
+    pub const CAN_HIDE: bool = true;
+
+    /// Minimizes Studio's top-level windows that are showing. Returns whether
+    /// there were any.
+    pub fn hide(pid: u32) -> bool {
+        struct Search {
+            pid: u32,
+            minimized: bool,
+        }
+
+        unsafe extern "system" fn visit(window: HWND, search: LPARAM) -> BOOL {
+            // SAFETY: `search` is the `&mut Search` passed to `EnumWindows`
+            // below, which only calls back before it returns.
+            let search = unsafe { &mut *(search as *mut Search) };
+
+            let mut owner_pid = 0;
+            // SAFETY: `window` came from `EnumWindows`. If it has closed
+            // since, these calls fail harmlessly.
+            unsafe {
+                GetWindowThreadProcessId(window, &mut owner_pid);
+                // Dialogs and tool windows are owned by the main window and
+                // are minimized along with it.
+                if owner_pid == search.pid
+                    && IsWindowVisible(window) != 0
+                    && IsIconic(window) == 0
+                    && GetWindow(window, GW_OWNER).is_null()
+                {
+                    // Hand focus back if Studio took it. Otherwise leave focus
+                    // where it is.
+                    let show = if GetForegroundWindow() == window {
+                        SW_MINIMIZE
+                    } else {
+                        SW_SHOWMINNOACTIVE
+                    };
+                    ShowWindow(window, show);
+                    search.minimized = true;
+                }
+            }
+            TRUE
+        }
+
+        let mut search = Search {
+            pid,
+            minimized: false,
+        };
+        // SAFETY: `visit` matches `WNDENUMPROC` and only uses `search` for the
+        // duration of the call.
+        unsafe { EnumWindows(Some(visit), &mut search as *mut Search as LPARAM) };
+        search.minimized
+    }
 
     pub fn default_executable() -> anyhow::Result<PathBuf> {
         if let Some(executable) = from_registry() {
@@ -295,6 +445,12 @@ mod platform {
     use std::path::PathBuf;
 
     use anyhow::bail;
+
+    pub const CAN_HIDE: bool = false;
+
+    pub fn hide(_pid: u32) -> bool {
+        false
+    }
 
     pub fn default_executable() -> anyhow::Result<PathBuf> {
         bail!(

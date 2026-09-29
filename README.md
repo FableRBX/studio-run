@@ -88,6 +88,7 @@ runtime-error.luau:3
 | `--startup-timeout <SECONDS>` | How long to wait for Studio to open the place and connect. Default: 120. |
 | `--timeout <SECONDS>` | How long the script may run before it's stopped. No limit by default. |
 | `--script-errors-only` | Only fail if the script itself throws. See [exit codes](#exit-codes). |
+| `--hidden` | Keep Studio out of sight while it runs. See [running Studio hidden](#running-studio-hidden). Env: `STUDIO_RUN_HIDDEN`. |
 | `--port <PORT>` | Local port Studio reports back on. Picks a free port by default. Env: `STUDIO_RUN_PORT`. |
 | `--studio <PATH>` | Studio executable, or `RobloxStudio.app` on macOS. Env: `ROBLOX_STUDIO_PATH`. |
 | `--plugins-dir <PATH>` | Studio's local plugins folder. Env: `ROBLOX_PLUGINS_PATH`. |
@@ -101,6 +102,20 @@ runtime-error.luau:3
 | 1 | The script threw an error, or something logged an error while it ran. Errors from threads the script spawned count. `--script-errors-only` limits this to errors thrown by the script itself. |
 | 2 | studio-run could not complete the run. For example, Studio wasn't found, didn't connect in time, closed early, or the script hit `--timeout`. |
 | 130 | The run was interrupted with Ctrl+C. |
+
+### Running Studio hidden
+
+Studio normally opens in front of whatever you're doing. Pass `--hidden` to keep it out of the
+way: on macOS Studio is hidden, as if you'd pressed Cmd+H, and on Windows its window is
+minimized. Its icon still shows in the Dock or taskbar. Studio brings itself to the front a few
+times while it opens a place, so it can flash on screen for a moment, but it's hidden again right
+away and focus goes back to the app you were using.
+
+To hide Studio on every run, such as for test suites in all your projects, set
+`STUDIO_RUN_HIDDEN=1` in your shell profile instead of passing the flag.
+
+Dialogs are hidden too. If a hidden run times out while starting, run it again without `--hidden`
+to see whether Studio is waiting on one.
 
 ## How it works
 
@@ -142,8 +157,8 @@ If runs time out, try `--verbose` and check that no dialog in Studio is waiting 
 - The command is `studio-run`. `--place` and `--script` work the same way.
 - `--place` is optional now.
 - The port is picked automatically. Use `--port` to pin it.
-- New options: `--timeout`, `--startup-timeout`, `--script-errors-only`, script arguments after
-  `--`, and scripts from stdin.
+- New options: `--timeout`, `--startup-timeout`, `--script-errors-only`, `--hidden`, script
+  arguments after `--`, and scripts from stdin.
 - Only the Studio that studio-run launched runs the script. Parallel runs and Studio windows you
   already have open are safe.
 - A missing plugins folder is created instead of causing a crash, and a plugins folder moved in
