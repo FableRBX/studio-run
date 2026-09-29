@@ -46,6 +46,7 @@ pub struct Options {
     pub port: u16,
     pub startup_timeout: Duration,
     pub timeout: Option<Duration>,
+    pub hidden: bool,
 }
 
 pub struct Outcome {
@@ -121,7 +122,7 @@ pub fn run(options: Options) -> anyhow::Result<Outcome> {
 
     // Declared last so it is dropped first: Studio has to be gone before its
     // plugin and place copy can be deleted.
-    let mut studio = options.studio.launch(&place_path)?;
+    let mut studio = options.studio.launch(&place_path, options.hidden)?;
 
     let startup_deadline = Instant::now() + options.startup_timeout;
     let mut run_deadline = None;
@@ -135,7 +136,10 @@ pub fn run(options: Options) -> anyhow::Result<Outcome> {
 
         let now = Instant::now();
         if !connected && now >= startup_deadline {
-            bail!(startup_timeout_message(options.startup_timeout));
+            bail!(startup_timeout_message(
+                options.startup_timeout,
+                options.hidden
+            ));
         }
         if run_deadline.is_some_and(|deadline| now >= deadline) {
             bail!(
@@ -244,12 +248,18 @@ fn print_output(level: Level, body: &str) {
     anstream::println!("{style}{body}{style:#}");
 }
 
-fn startup_timeout_message(timeout: Duration) -> String {
+fn startup_timeout_message(timeout: Duration, hidden: bool) -> String {
+    let see_dialogs = if hidden {
+        " Studio was hidden, so run without --hidden to see it."
+    } else {
+        ""
+    };
+
     format!(
         "Roblox Studio did not connect within {}.\n\n\
          Things to check:\n  \
          - Studio is signed in. Open it once by hand to sign in.\n  \
-         - Studio isn't waiting on a dialog, such as a permission prompt for the studio-run plugin.\n  \
+         - Studio isn't waiting on a dialog, such as a permission prompt for the studio-run plugin.{see_dialogs}\n  \
          - The place opens in Studio without errors.\n\n\
          Use --startup-timeout to wait longer, and --verbose to see what happened.",
         seconds(timeout)

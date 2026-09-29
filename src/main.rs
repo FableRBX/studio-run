@@ -8,7 +8,7 @@ use std::{
 
 use anstyle::AnsiColor;
 use anyhow::Context;
-use clap::Parser;
+use clap::{Parser, builder::FalseyValueParser};
 
 static VERBOSE: AtomicBool = AtomicBool::new(false);
 
@@ -81,6 +81,11 @@ struct Cli {
     #[arg(long)]
     script_errors_only: bool,
 
+    /// Keep Studio out of sight while it runs: hidden on macOS, minimized on
+    /// Windows. It may flash on screen for a moment while it starts.
+    #[arg(long, env = "STUDIO_RUN_HIDDEN", value_parser = FalseyValueParser::new())]
+    hidden: bool,
+
     /// Local port Studio reports back on. Picks a free one by default.
     #[arg(long, env = "STUDIO_RUN_PORT")]
     port: Option<u16>,
@@ -133,6 +138,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         port: cli.port.unwrap_or(0),
         startup_timeout: Duration::from_secs(cli.startup_timeout),
         timeout: cli.timeout.map(Duration::from_secs),
+        hidden: cli.hidden,
     })?;
 
     let failed = !outcome.script_succeeded || (outcome.error_output && !cli.script_errors_only);

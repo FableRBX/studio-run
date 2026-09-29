@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `--hidden` keeps Studio out of sight while it runs: hidden on macOS and minimized on Windows.
+  Set `STUDIO_RUN_HIDDEN=1` to hide it on every run.
+
 ## 0.1.0 (2026-09-28)
 
 This is the first release, rebuilt from scratch as a successor to run-in-roblox.
